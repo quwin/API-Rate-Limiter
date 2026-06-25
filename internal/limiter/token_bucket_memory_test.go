@@ -1,4 +1,4 @@
-package main
+package limiter_test
 
 import (
 	"context"

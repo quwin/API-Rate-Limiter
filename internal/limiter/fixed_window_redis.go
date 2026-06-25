@@ -68,7 +68,7 @@ func (l *FixedWindowRedisLimiter) Allow(ctx context.Context, key string) (Decisi
 		return Decision{}, err
 	}
 
-	values, ok := result.([]interface{})
+	values, ok := result.([]any)
 	if !ok || len(values) != 3 {
 		return Decision{}, errInvalidRedisScriptResult
 	}
@@ -94,10 +94,7 @@ func (l *FixedWindowRedisLimiter) Allow(ctx context.Context, key string) (Decisi
 
 	retryAfter := time.Duration(0)
 	if allowedInt == 0 {
-		retryAfter = time.Duration(ttlSeconds) * time.Second
-		if retryAfter < time.Second {
-			retryAfter = time.Second
-		}
+		retryAfter = max(time.Duration(ttlSeconds) * time.Second, time.Second)
 	}
 
 	return Decision{
