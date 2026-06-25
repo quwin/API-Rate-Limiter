@@ -16,7 +16,7 @@ type FixedWindowMemoryLimiter struct {
 	limit    int64
 	window   time.Duration
 	counters map[string]fixedWindowCounter
-	now      func() time.Time
+	Now      func() time.Time
 }
 
 func NewFixedWindowMemoryLimiter(limit int64, window time.Duration) *FixedWindowMemoryLimiter {
@@ -30,7 +30,7 @@ func NewFixedWindowMemoryLimiter(limit int64, window time.Duration) *FixedWindow
 		limit:    limit,
 		window:   window,
 		counters: make(map[string]fixedWindowCounter),
-		now:      time.Now,
+		Now:      time.Now,
 	}
 }
 
@@ -38,17 +38,17 @@ func (limiter *FixedWindowMemoryLimiter) Allow(ctx context.Context, key string) 
 	if err := ctx.Err(); err != nil {
 		return Decision{}, err
 	}
-	now := limiter.now()
+	Now := limiter.Now()
 
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
 
 	counter, exists := limiter.counters[key]
 
-	if !exists || now.After(counter.resetAt) {
+	if !exists || Now.After(counter.resetAt) {
 		counter = fixedWindowCounter{
 			count:   0,
-			resetAt: now.Add(limiter.window),
+			resetAt: Now.Add(limiter.window),
 		}
 	}
 
