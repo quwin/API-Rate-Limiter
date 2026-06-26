@@ -7,8 +7,10 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"quwin/api-gateway/internal/middleware"
+	"quwin/api-gateway/internal/auth"
+	"quwin/api-gateway/internal/gateway"
 	"quwin/api-gateway/internal/limiter"
+	"quwin/api-gateway/internal/middleware"
 	"strconv"
 	"time"
 
@@ -28,12 +30,20 @@ func main() {
 
 	reverseProxy := httputil.NewSingleHostReverseProxy(parsedUpstreamURL)
 
-	rateLimiter := getRateLimiter()
+	apiKeyAuthenticator, err := auth.NewAPIKeyAuthenticatorFromHashes(getenvString("API_KEY_HASHES", ""))
+	if err != nil {
+		log.Fatalf("invalid API key configuration: %v", err)
+	}
 
-	apiHandler := middleware.RateLimitMiddleware(rateLimiter, reverseProxy)
+	redisClient := newRedisClientIfNeeded()
+	rateLimiter := getRateLimiter(redisClient)
+
+	apiHandler := middleware.RateLimitMiddleware(apiKeyAuthenticator, rateLimiter, reverseProxy)
 	apiHandler = middleware.MetricsMiddleware(apiHandler)
 
 	mux := http.NewServeMux()
+	mux.Handle("/healthz", gateway.HealthzHandler())
+	mux.Handle("/readyz", gateway.ReadyzHandler(redisClient))
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/", apiHandler)
 
@@ -50,7 +60,7 @@ func main() {
 		log.Fatalf("gateway failed: %v", err)
 	}
 }
-func getRateLimiter() limiter.RateLimiter {
+func getRateLimiter(redisClient *redis.Client) limiter.RateLimiter {
 	limiterType := getenvString("RATE_LIMITER", "fixed-window-memory")
 	switch limiterType {
 	case "fixed-window-memory":
@@ -70,19 +80,19 @@ func getRateLimiter() limiter.RateLimiter {
 		)
 	case "fixed-window-redis":
 		return limiter.NewFixedWindowRedisLimiter(
-			newRedisClient(),
+			redisClient,
 			getenvInt64("RATE_LIMIT", 5),
 			getenvDuration("RATE_LIMIT_WINDOW", time.Minute),
 		)
 	case "token-bucket-redis":
 		return limiter.NewTokenBucketRedisLimiter(
-			newRedisClient(),
+			redisClient,
 			getenvInt64("BUCKET_CAPACITY", 5),
 			getenvFloat64("RATE_LIMIT", 5)/60.0,
 		)
 	case "sliding-window-redis":
 		return limiter.NewSlidingWindowRedisLimiter(
-			newRedisClient(),
+			redisClient,
 			getenvInt64("RATE_LIMIT", 5),
 			getenvDuration("RATE_LIMIT_WINDOW", time.Minute),
 			getenvString("GATEWAY_INSTANCE_ID", uuid.NewString()),
@@ -92,7 +102,16 @@ func getRateLimiter() limiter.RateLimiter {
 		return nil
 	}
 }
+func newRedisClientIfNeeded() *redis.Client {
+	limiterType := getenvString("RATE_LIMITER", "fixed-window-memory")
 
+	switch limiterType {
+	case "fixed-window-redis", "token-bucket-redis", "sliding-window-redis":
+		return newRedisClient()
+	default:
+		return nil
+	}
+}
 func newRedisClient() *redis.Client {
 	client := redis.NewClient(&redis.Options{
 		Addr: getenvString("REDIS_ADDR", "localhost:6379"),

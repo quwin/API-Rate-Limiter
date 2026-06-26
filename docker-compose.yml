@@ -1,66 +1,40 @@
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
 
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    ports:
-      - "9000:9000"
+    expose:
+      - "9000"
 
-  gateway-1:
+  gateway:
     build:
       context: .
       dockerfile: Dockerfile
     environment:
       GATEWAY_ADDR: ":8080"
-      UPSTREAM_URL: "http://backend:9000"
+      UPSTREAM_URL: "${UPSTREAM_URL:-http://backend:9000}"
       REDIS_ADDR: "redis:6379"
-      RATE_LIMITER: "token-bucket-redis"
-      RATE_LIMIT: "5"
-      RATE_LIMIT_WINDOW: "1m"
-      BUCKET_CAPACITY: "5"
-      GATEWAY_INSTANCE_ID: "gateway-1"
+      RATE_LIMITER: "${RATE_LIMITER:-token-bucket-redis}"
+      RATE_LIMIT: "${RATE_LIMIT:-5}"
+      RATE_LIMIT_WINDOW: "${RATE_LIMIT_WINDOW:-1m}"
+      BUCKET_CAPACITY: "${BUCKET_CAPACITY:-5}"
+      API_KEY_HASHES: "${API_KEY_HASHES}"
+    expose:
+      - "8080"
     depends_on:
       - redis
       - backend
-
-  gateway-2:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      GATEWAY_ADDR: ":8080"
-      UPSTREAM_URL: "http://backend:9000"
-      REDIS_ADDR: "redis:6379"
-      RATE_LIMITER: "token-bucket-redis"
-      RATE_LIMIT: "5"
-      RATE_LIMIT_WINDOW: "1m"
-      BUCKET_CAPACITY: "5"
-      GATEWAY_INSTANCE_ID: "gateway-2"
-    depends_on:
-      - redis
-      - backend
-
-  gateway-3:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      GATEWAY_ADDR: ":8080"
-      UPSTREAM_URL: "http://backend:9000"
-      REDIS_ADDR: "redis:6379"
-      RATE_LIMITER: "token-bucket-redis"
-      RATE_LIMIT: "5"
-      RATE_LIMIT_WINDOW: "1m"
-      BUCKET_CAPACITY: "5"
-      GATEWAY_INSTANCE_ID: "gateway-3"
-    depends_on:
-      - redis
-      - backend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/readyz"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
+      start_period: 5s
 
   nginx:
     image: nginx:1.27-alpine
@@ -69,9 +43,7 @@ services:
     volumes:
       - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - gateway-1
-      - gateway-2
-      - gateway-3
+      - gateway
 
   prometheus:
     image: prom/prometheus:v2.55.1
@@ -80,9 +52,7 @@ services:
     volumes:
       - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
-      - gateway-1
-      - gateway-2
-      - gateway-3
+      - gateway
 
   grafana:
     image: grafana/grafana:11.3.0
