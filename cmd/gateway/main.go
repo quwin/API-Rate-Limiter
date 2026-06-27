@@ -14,7 +14,7 @@ import (
 	"quwin/api-gateway/internal/policy"
 	"strconv"
 	"time"
-
+	"google.golang.org/api/idtoken"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
@@ -29,11 +29,25 @@ func main() {
 		log.Fatalf("invalid upstream URL %q: %v", upstreamURL, err)
 	}
 
+	upstreamAudience := getenvString("UPSTREAM_AUDIENCE", upstreamURL)
+	tokenSource, err := idtoken.NewTokenSource(context.Background(), upstreamAudience)
+	if err != nil {
+		log.Printf("failed to create upstream ID token source: %v", err)
+		tokenSource = nil
+	}
 	reverseProxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(parsedUpstreamURL)
 			r.Out.Host = parsedUpstreamURL.Host
 			r.SetXForwarded()
+
+			token, err := tokenSource.Token()
+			if err == nil {
+				token.SetAuthHeader(r.Out)
+			}
+			if err != nil {
+				log.Printf("failed to get upstream ID token: %v", err)
+			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Printf(
