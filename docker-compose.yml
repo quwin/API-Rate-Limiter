@@ -14,8 +14,6 @@ services:
       API_KEY_HASHES: "${API_KEY_HASHES}"
     expose:
       - "8080"
-    depends_on:
-      - redis
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/readyz"]
       interval: 10s
